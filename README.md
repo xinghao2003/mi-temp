@@ -39,8 +39,12 @@ All responses are JSON encoded.
 - `GET /health` – simple health probe returning `{ "status": "ok" }`.
 - `GET /devices` – latest measurement for every discovered device.
 - `GET /devices/<MAC>?limit=50&since=<timestamp>` – measurement history for the
-given device. `limit` defaults to 50 (maximum 1000) and `since` can be used to
-filter results newer than the supplied Unix timestamp.
+  given device. `limit` defaults to 50 (maximum 1000) and `since` can be used to
+  filter results newer than the supplied Unix timestamp.
+- `GET /devices/<MAC>/range?range=24h` – measurement history restricted to the
+  provided relative time range (e.g. `24h`, `48h`, `1w`, `1m`). The `range`
+  parameter also accepts the alias `period`, and the optional `limit` parameter
+  defaults to 1000 results with the same maximum cap.
 
 ## Data Storage
 
