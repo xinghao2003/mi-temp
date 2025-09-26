@@ -495,9 +495,14 @@ def main() -> None:
     server.daemon_threads = True
     logging.info("HTTP API listening on http://%s:%d", args.host, args.port)
 
+    shutdown_initiated = threading.Event()
+
     def shutdown(signum: int, _frame) -> None:
+        if shutdown_initiated.is_set():
+            return
+        shutdown_initiated.set()
         logging.info("Received signal %s, shutting down", signum)
-        server.shutdown()
+        threading.Thread(target=server.shutdown, name="HTTPServerShutdown", daemon=True).start()
         scanner.stop()
 
     signal.signal(signal.SIGTERM, shutdown)
