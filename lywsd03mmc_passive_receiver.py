@@ -373,20 +373,43 @@ class SensorAPIHandler(BaseHTTPRequestHandler):
             return
         if parsed.path.startswith("/devices/"):
             parts = [p for p in parsed.path.split("/") if p]
-            if len(parts) != 2 or parts[0].lower() != "devices":
+            if not parts or parts[0].lower() != "devices":
                 self._json_response({"error": "Not found"}, status=404)
                 return
-            mac = parts[1].upper()
-            query = parse_qs(parsed.query)
-            limit_value = self._parse_int(query.get("limit", ["50"])[0], default=50)
-            limit = max(1, min(limit_value or 50, 1000))
-            since_value = query.get("since", [None])[0]
-            since = self._parse_int(since_value, default=None) if since_value else None
-            history = self._store.get_history(mac, limit, since)
-            if history:
-                self._json_response(history)
-            else:
-                self._json_response({"error": "No data for device"}, status=404)
+
+            if len(parts) == 2:
+                mac = parts[1].upper()
+                query = parse_qs(parsed.query)
+                limit_value = self._parse_int(query.get("limit", ["50"])[0], default=50)
+                limit = max(1, min(limit_value or 50, 1000))
+                since_value = query.get("since", [None])[0]
+                since = self._parse_int(since_value, default=None) if since_value else None
+                history = self._store.get_history(mac, limit, since)
+                if history:
+                    self._json_response(history)
+                else:
+                    self._json_response({"error": "No data for device"}, status=404)
+                return
+
+            if len(parts) == 3 and parts[2].lower() == "range":
+                mac = parts[1].upper()
+                query = parse_qs(parsed.query)
+                range_value = query.get("range", [None])[0] or query.get("period", [None])[0]
+                seconds = self._parse_range(range_value) if range_value else None
+                if seconds is None:
+                    self._json_response({"error": "Invalid range value"}, status=400)
+                    return
+                limit_value = self._parse_int(query.get("limit", ["1000"])[0], default=1000)
+                limit = max(1, min(limit_value or 1000, 1000))
+                since = int(time.time()) - seconds
+                history = self._store.get_history(mac, limit, since)
+                if history:
+                    self._json_response(history)
+                else:
+                    self._json_response({"error": "No data for device"}, status=404)
+                return
+
+            self._json_response({"error": "Not found"}, status=404)
             return
         self._json_response({"error": "Not found"}, status=404)
 
@@ -407,6 +430,42 @@ class SensorAPIHandler(BaseHTTPRequestHandler):
             return int(value)
         except (TypeError, ValueError):
             return default
+
+    @staticmethod
+    def _parse_range(value: Optional[str]) -> Optional[int]:
+        if not value:
+            return None
+        normalized = value.strip().lower()
+        aliases = {
+            "24h": 24 * 3600,
+            "48h": 48 * 3600,
+            "1d": 24 * 3600,
+            "2d": 2 * 24 * 3600,
+            "3d": 3 * 24 * 3600,
+            "7d": 7 * 24 * 3600,
+            "1w": 7 * 24 * 3600,
+            "1week": 7 * 24 * 3600,
+            "2w": 14 * 24 * 3600,
+            "1m": 30 * 24 * 3600,
+            "1month": 30 * 24 * 3600,
+        }
+        if normalized in aliases:
+            return aliases[normalized]
+        try:
+            number = int(normalized[:-1])
+            suffix = normalized[-1]
+        except (ValueError, IndexError):
+            return None
+        seconds_per_unit = {
+            "h": 3600,
+            "d": 24 * 3600,
+            "w": 7 * 24 * 3600,
+            "m": 30 * 24 * 3600,
+        }
+        unit_seconds = seconds_per_unit.get(suffix)
+        if unit_seconds is None or number <= 0:
+            return None
+        return number * unit_seconds
 
 
 # ---------------------------------------------------------------------------
