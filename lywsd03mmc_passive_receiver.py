@@ -218,7 +218,7 @@ class DataStore:
             rows = list(self._conn.execute(query))
         return [self._row_to_dict(row) for row in rows]
 
-    def get_history(self, mac: str, limit: int, since: Optional[int]) -> List[Dict[str, object]]:
+    def get_history(self, mac: str, limit: Optional[int], since: Optional[int]) -> List[Dict[str, object]]:
         params: List[object] = [mac]
         query = (
             "SELECT mac, temperature, humidity, voltage, battery, rssi, timestamp "
@@ -227,8 +227,10 @@ class DataStore:
         if since is not None:
             query += " AND timestamp >= ?"
             params.append(since)
-        query += " ORDER BY timestamp DESC LIMIT ?"
-        params.append(limit)
+        query += " ORDER BY timestamp DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
         with self._lock:
             rows = list(self._conn.execute(query, params))
         return [self._row_to_dict(row) for row in rows]
@@ -380,8 +382,9 @@ class SensorAPIHandler(BaseHTTPRequestHandler):
             if len(parts) == 2:
                 mac = parts[1].upper()
                 query = parse_qs(parsed.query)
-                limit_value = self._parse_int(query.get("limit", ["50"])[0], default=50)
-                limit = max(1, min(limit_value or 50, 1000))
+                limit_param = query.get("limit", ["50"])[0]
+                limit_value = self._parse_int(limit_param, default=50)
+                limit = max(1, min(limit_value, 1000))
                 since_value = query.get("since", [None])[0]
                 since = self._parse_int(since_value, default=None) if since_value else None
                 history = self._store.get_history(mac, limit, since)
@@ -399,8 +402,25 @@ class SensorAPIHandler(BaseHTTPRequestHandler):
                 if seconds is None:
                     self._json_response({"error": "Invalid range value"}, status=400)
                     return
-                limit_value = self._parse_int(query.get("limit", ["1000"])[0], default=1000)
-                limit = max(1, min(limit_value or 1000, 1000))
+                limit_param = query.get("limit", [None])[0]
+                limit: Optional[int]
+                if limit_param is None:
+                    limit = 1000
+                else:
+                    normalized_limit = limit_param.strip().lower()
+                    if normalized_limit == "all":
+                        limit = None
+                    else:
+                        parsed_limit = self._parse_int(limit_param, default=None)
+                        if parsed_limit is None:
+                            limit = 1000
+                        else:
+                            if parsed_limit <= 0:
+                                limit = 1
+                            elif parsed_limit > 1000:
+                                limit = None
+                            else:
+                                limit = parsed_limit
                 since = int(time.time()) - seconds
                 history = self._store.get_history(mac, limit, since)
                 if history:
